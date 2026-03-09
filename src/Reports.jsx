@@ -1,453 +1,219 @@
-import React, { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { Alert, Box, Grid, Paper, Typography } from "@mui/material";
 import {
-  Box,
-  Typography,
-  Grid,
-  Card,
-  CardContent,
-  Button,
-  Select,
-  MenuItem,
-  Stack,
-} from "@mui/material";
-import { createTheme, ThemeProvider } from "@mui/material/styles";
-import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
-import FileUploadIcon from "@mui/icons-material/FileUpload";
-import {
-  BarChart,
   Bar,
-  XAxis,
-  Tooltip,
-  ResponsiveContainer,
+  BarChart,
   Cell,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
 } from "recharts";
+import { getAdminRequests, getUserRequests } from "./api/requestApi";
+import { getStoredAuth } from "./lib/authStorage";
 
-const theme = createTheme({
-  palette: {
-    mode: "dark",
-    background: {
-      default: "#0f1421",
-      paper: "#141c2e",
-    },
-    text: {
-      primary: "#ffffff",
-      secondary: "#6b7a99",
-    },
-  },
-  typography: {
-    fontFamily: "'Inter', 'Segoe UI', sans-serif",
-  },
-});
+const CHART_COLORS = ["#C9A84C", "#2DD4BF", "#818CF8", "#F87171", "#4ADE80", "#FCD34D"];
 
-const reportCards = [
-  {
-    icon: "⏱️",
-    title: "Turnaround Time",
-    desc: "Avg approval time by dept, category & level.",
-    updated: "Updated today",
-  },
-  {
-    icon: "✅",
-    title: "Approval Rate",
-    desc: "Approval vs rejection by approver & category.",
-    updated: "Updated today",
-  },
-  {
-    icon: "🔍",
-    title: "Bottleneck Detection",
-    desc: "Identify levels causing workflow delays.",
-    updated: "Updated 2h ago",
-  },
-  {
-    icon: "🏢",
-    title: "Department Summary",
-    desc: "Requests, spends & stats per department.",
-    updated: "Updated yesterday",
-  },
-  {
-    icon: "📋",
-    title: "Audit Log",
-    desc: "Full immutable history for compliance.",
-    updated: "Real-time",
-  },
-  {
-    icon: "💰",
-    title: "Spend Analytics",
-    desc: "Budget utilization and category-wise spends.",
-    updated: "Updated today",
-  },
-];
+function buildStatusData(rows) {
+  const map = rows.reduce((acc, row) => {
+    acc[row.status] = (acc[row.status] || 0) + 1;
+    return acc;
+  }, {});
+  return Object.entries(map).map(([name, value]) => ({ name, value }));
+}
 
-const volumeData = [
-  { month: "Apr", value: 55 },
-  { month: "May", value: 75 },
-  { month: "Jun", value: 70 },
-  { month: "Jul", value: 92 },
-  { month: "Aug", value: 108 },
-  { month: "Sep", value: 125 },
-  { month: "Oct", value: 150 },
-  { month: "Nov", value: 138 },
-  { month: "Dec", value: 118 },
-  { month: "Jan", value: 132 },
-  { month: "Feb", value: 112 },
-  { month: "Mar", value: 98 },
-];
+function buildTypeData(rows) {
+  const map = rows.reduce((acc, row) => {
+    const key = row.requestType || "Other";
+    acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, {});
+  return Object.entries(map).map(([name, value]) => ({ name, value }));
+}
 
-// Gold → teal gradient colors matching screenshot
-const barColors = [
-  "#7A5C10",
-  "#8B6914",
-  "#9B7820",
-  "#A8852A",
-  "#B59235",
-  "#1AB882",
-  "#1DC998",
-  "#1DD4A8",
-  "#1BBFA0",
-  "#19AB90",
-  "#179880",
-  "#158870",
-];
+function buildUrgencyData(rows) {
+  const order = ["LOW", "NORMAL", "HIGH", "URGENT"];
+  const map = rows.reduce((acc, row) => {
+    const key = row.urgency || "LOW";
+    acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, {});
+  return order.map((name) => ({ name, value: map[name] || 0 }));
+}
 
-const approvalRates = [
-  { dept: "IT",         rate: 92, barColor: "#D4A017", textColor: "#F5C842" },
-  { dept: "Finance",    rate: 88, barColor: "#D4A017", textColor: "#F5C842" },
-  { dept: "HR",         rate: 95, barColor: "#D4A017", textColor: "#F5C842" },
-  { dept: "Operations", rate: 78, barColor: "#1DC9A0", textColor: "#1DC9A0" },
-  { dept: "Sales",      rate: 84, barColor: "#D4A017", textColor: "#F5C842" },
-];
-
-const CustomTooltip = ({ active, payload, label }) => {
-  if (active && payload && payload.length) {
-    return (
-      <Box
-        sx={{
-          backgroundColor: "#1e2a3a",
-          border: "1px solid #2a3a50",
-          borderRadius: "8px",
-          px: 1.5,
-          py: 1,
-        }}
-      >
-        <Typography sx={{ color: "#fff", fontSize: "0.75rem", fontWeight: 600 }}>
-          {label}: {payload[0].value}
-        </Typography>
-      </Box>
-    );
-  }
-  return null;
-};
+function reportCard(title, value, subtitle) {
+  return { title, value, subtitle };
+}
 
 export default function Reports() {
-  const [period, setPeriod] = useState("This Month");
+  const auth = useMemo(() => getStoredAuth(), []);
+  const [rows, setRows] = useState([]);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    async function load() {
+      setError("");
+      setLoading(true);
+      try {
+        const data =
+          auth?.role === "ADMIN" ? await getAdminRequests(auth) : await getUserRequests(auth);
+        setRows(data || []);
+      } catch (err) {
+        setError(err?.message || "Failed to load reports.");
+      } finally {
+        setLoading(false);
+      }
+    }
+    load();
+  }, [auth]);
+
+  const statusData = buildStatusData(rows);
+  const typeData = buildTypeData(rows);
+  const urgencyData = buildUrgencyData(rows);
+
+  const pending = rows.filter((x) => x.status === "PENDING").length;
+  const approved = rows.filter((x) => x.status === "APPROVED").length;
+  const rejected = rows.filter((x) => x.status === "REJECTED").length;
+  const approvalRate = rows.length ? Math.round((approved / rows.length) * 100) : 0;
+
+  const cards = [
+    reportCard("Total Requests", rows.length, loading ? "Loading..." : "Live volume"),
+    reportCard("Approval Rate", `${approvalRate}%`, "Approved / Total"),
+    reportCard("Pending Queue", pending, "Awaiting decision"),
+    reportCard("Rejected", rejected, "Needs resubmission"),
+  ];
 
   return (
-    <ThemeProvider theme={theme}>
-      <Box
+    <Box sx={{ p: 3 }}>
+      <Typography
         sx={{
-          minHeight: "100vh",
-          backgroundColor: "#0f1421",
-          px: "32px",
-          py: "24px",
+          fontFamily: "'Syne', sans-serif",
+          fontSize: 20,
+          fontWeight: 800,
+          color: "#F4F6FB",
+          mb: 0.5,
         }}
       >
-        {/* ── HEADER ── */}
-        <Box
-          sx={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "flex-start",
-            mb: "28px",
-          }}
-        >
-          <Box>
-            <Typography
+        Reports
+      </Typography>
+      <Typography sx={{ fontSize: 12, color: "#8B9AB5", mb: 2.5 }}>
+        Live analytics and operational insights
+      </Typography>
+
+      {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+
+      <Grid container spacing={2} sx={{ mb: 2 }}>
+        {cards.map((card) => (
+          <Grid item xs={12} sm={6} md={3} key={card.title}>
+            <Paper
+              elevation={0}
               sx={{
-                fontWeight: 800,
-                fontSize: "1.5rem",
-                color: "#ffffff",
-                letterSpacing: "-0.4px",
-                lineHeight: 1.15,
+                p: 2,
+                borderRadius: 2,
+                border: "1px solid rgba(201,168,76,0.18)",
+                bgcolor: "rgba(26,37,64,0.6)",
               }}
             >
-              Reports
-            </Typography>
-            <Typography
-              sx={{
-                color: "#6b7a99",
-                fontSize: "0.82rem",
-                mt: "5px",
-                fontWeight: 400,
-              }}
-            >
-              Analytics and workflow insights
-            </Typography>
-          </Box>
-
-          <Box sx={{ display: "flex", gap: "12px", alignItems: "center" }}>
-            <Select
-              value={period}
-              onChange={(e) => setPeriod(e.target.value)}
-              IconComponent={KeyboardArrowDownIcon}
-              size="small"
-              sx={{
-                color: "#c8d4e8",
-                backgroundColor: "transparent",
-                border: "none",
-                ".MuiOutlinedInput-notchedOutline": { border: "none" },
-                ".MuiSelect-icon": { color: "#6b7a99", fontSize: "1.1rem" },
-                fontSize: "0.875rem",
-                fontWeight: 500,
-                "& .MuiSelect-select": { pr: "28px !important", pl: 0, py: "6px" },
-              }}
-            >
-              <MenuItem value="This Month">This Month</MenuItem>
-              <MenuItem value="Last Month">Last Month</MenuItem>
-              <MenuItem value="Last Quarter">Last Quarter</MenuItem>
-              <MenuItem value="This Year">This Year</MenuItem>
-            </Select>
-
-            <Button
-              variant="contained"
-              startIcon={<FileUploadIcon sx={{ fontSize: "1rem !important" }} />}
-              sx={{
-                backgroundColor: "#E8A020",
-                color: "#000000",
-                fontWeight: 700,
-                fontSize: "0.875rem",
-                borderRadius: "10px",
-                textTransform: "none",
-                px: "20px",
-                py: "7px",
-                minWidth: "auto",
-                boxShadow: "none",
-                "&:hover": { backgroundColor: "#D4901A", boxShadow: "none" },
-              }}
-            >
-              Export
-            </Button>
-          </Box>
-        </Box>
-
-        {/* ── 6 REPORT CARDS ── */}
-        <Grid container spacing={2} sx={{ mb: "18px" }}>
-          {reportCards.map((card, i) => (
-            <Grid item xs={12} sm={6} md={4} key={i}>
-              <Card
-                sx={{
-                  backgroundColor: "#141c2e",
-                  border: "1px solid #1c2742",
-                  borderRadius: "14px",
-                  boxShadow: "none",
-                  height: "100%",
-                  cursor: "pointer",
-                  transition: "border-color 0.2s",
-                  "&:hover": { borderColor: "#2d3f6b" },
-                }}
-              >
-                <CardContent
-                  sx={{
-                    p: "24px",
-                    "&:last-child": { pb: "20px" },
-                    display: "flex",
-                    flexDirection: "column",
-                  }}
-                >
-                  {/* Icon */}
-                  <Box sx={{ fontSize: "1.5rem", mb: "16px", lineHeight: 1 }}>
-                    {card.icon}
-                  </Box>
-
-                  {/* Title */}
-                  <Typography
-                    sx={{
-                      fontWeight: 700,
-                      fontSize: "0.925rem",
-                      color: "#ffffff",
-                      mb: "6px",
-                    }}
-                  >
-                    {card.title}
-                  </Typography>
-
-                  {/* Description */}
-                  <Typography
-                    sx={{
-                      color: "#6b7a99",
-                      fontSize: "0.8rem",
-                      lineHeight: 1.55,
-                      flex: 1,
-                    }}
-                  >
-                    {card.desc}
-                  </Typography>
-
-                  {/* Footer */}
-                  <Box
-                    sx={{
-                      borderTop: "1px solid #1c2742",
-                      mt: "20px",
-                      pt: "14px",
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                    }}
-                  >
-                    <Typography sx={{ color: "#6b7a99", fontSize: "0.76rem" }}>
-                      {card.updated}
-                    </Typography>
-                    <Typography
-                      sx={{
-                        color: "#E8A020",
-                        fontSize: "0.8rem",
-                        fontWeight: 600,
-                        cursor: "pointer",
-                        "&:hover": { color: "#F5B830" },
-                      }}
-                    >
-                      View →
-                    </Typography>
-                  </Box>
-                </CardContent>
-              </Card>
-            </Grid>
-          ))}
-        </Grid>
-
-        {/* ── BOTTOM ROW ── */}
-        <Grid container spacing={2}>
-          {/* Volume Bar Chart */}
-          <Grid item xs={12} md={8}>
-            <Card
-              sx={{
-                backgroundColor: "#141c2e",
-                border: "1px solid #1c2742",
-                borderRadius: "14px",
-                boxShadow: "none",
-              }}
-            >
-              <CardContent sx={{ p: "24px 24px 12px 24px", "&:last-child": { pb: "12px" } }}>
-                <Typography
-                  sx={{
-                    fontWeight: 700,
-                    fontSize: "0.925rem",
-                    color: "#ffffff",
-                    mb: "24px",
-                  }}
-                >
-                  Volume (Last 12 Months)
-                </Typography>
-                <ResponsiveContainer width="100%" height={190}>
-                  <BarChart
-                    data={volumeData}
-                    barCategoryGap="22%"
-                    margin={{ top: 0, right: 0, left: -15, bottom: 0 }}
-                  >
-                    <XAxis
-                      dataKey="month"
-                      axisLine={false}
-                      tickLine={false}
-                      tick={{
-                        fill: "#6b7a99",
-                        fontSize: 11,
-                        fontFamily: "Inter, sans-serif",
-                      }}
-                      dy={10}
-                    />
-                    <Tooltip
-                      content={<CustomTooltip />}
-                      cursor={{ fill: "rgba(255,255,255,0.025)" }}
-                    />
-                    <Bar dataKey="value" radius={[3, 3, 0, 0]}>
-                      {volumeData.map((_, index) => (
-                        <Cell key={index} fill={barColors[index]} />
-                      ))}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              </CardContent>
-            </Card>
+              <Typography sx={{ color: "#8B9AB5", fontSize: 11 }}>{card.title}</Typography>
+              <Typography sx={{ color: "#F4F6FB", fontSize: 30, fontWeight: 800, lineHeight: 1.1, mt: 0.7 }}>
+                {card.value}
+              </Typography>
+              <Typography sx={{ color: "#C9A84C", fontSize: 11, mt: 0.8 }}>{card.subtitle}</Typography>
+            </Paper>
           </Grid>
+        ))}
+      </Grid>
 
-          {/* Approval Rate by Dept */}
-          <Grid item xs={12} md={4}>
-            <Card
-              sx={{
-                backgroundColor: "#141c2e",
-                border: "1px solid #1c2742",
-                borderRadius: "14px",
-                boxShadow: "none",
-                height: "100%",
-              }}
-            >
-              <CardContent sx={{ p: "24px", "&:last-child": { pb: "24px" } }}>
-                <Typography
-                  sx={{
-                    fontWeight: 700,
-                    fontSize: "0.925rem",
-                    color: "#ffffff",
-                    mb: "26px",
-                  }}
-                >
-                  Approval Rate by Dept
-                </Typography>
-                <Stack spacing={2.5}>
-                  {approvalRates.map((item, i) => (
-                    <Box key={i}>
-                      <Box
-                        sx={{
-                          display: "flex",
-                          justifyContent: "space-between",
-                          alignItems: "center",
-                          mb: "8px",
-                        }}
-                      >
-                        <Typography
-                          sx={{
-                            color: "#c8d4e8",
-                            fontSize: "0.82rem",
-                            fontWeight: 500,
-                          }}
-                        >
-                          {item.dept}
-                        </Typography>
-                        <Typography
-                          sx={{
-                            color: item.textColor,
-                            fontSize: "0.82rem",
-                            fontWeight: 700,
-                          }}
-                        >
-                          {item.rate}%
-                        </Typography>
-                      </Box>
-                      {/* Custom progress bar */}
-                      <Box
-                        sx={{
-                          width: "100%",
-                          height: "6px",
-                          borderRadius: "3px",
-                          backgroundColor: "#1c2742",
-                          overflow: "hidden",
-                        }}
-                      >
-                        <Box
-                          sx={{
-                            width: `${item.rate}%`,
-                            height: "100%",
-                            borderRadius: "3px",
-                            backgroundColor: item.barColor,
-                          }}
-                        />
-                      </Box>
-                    </Box>
+      <Grid container spacing={2}>
+        <Grid item xs={12} md={7}>
+          <Paper
+            elevation={0}
+            sx={{
+              p: 2,
+              borderRadius: 2,
+              border: "1px solid rgba(201,168,76,0.18)",
+              bgcolor: "rgba(26,37,64,0.6)",
+              height: 320,
+            }}
+          >
+            <Typography sx={{ color: "#F4F6FB", fontSize: 14, fontWeight: 700, mb: 1.2 }}>
+              Requests by Type
+            </Typography>
+            <ResponsiveContainer width="100%" height="88%">
+              <BarChart data={typeData}>
+                <XAxis dataKey="name" stroke="#8B9AB5" fontSize={11} />
+                <YAxis stroke="#8B9AB5" fontSize={11} />
+                <Tooltip />
+                <Bar dataKey="value" radius={[6, 6, 0, 0]}>
+                  {typeData.map((_, i) => (
+                    <Cell key={`cell-${i}`} fill={CHART_COLORS[i % CHART_COLORS.length]} />
                   ))}
-                </Stack>
-              </CardContent>
-            </Card>
-          </Grid>
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </Paper>
         </Grid>
-      </Box>
-    </ThemeProvider>
+
+        <Grid item xs={12} md={5}>
+          <Paper
+            elevation={0}
+            sx={{
+              p: 2,
+              borderRadius: 2,
+              border: "1px solid rgba(201,168,76,0.18)",
+              bgcolor: "rgba(26,37,64,0.6)",
+              height: 320,
+            }}
+          >
+            <Typography sx={{ color: "#F4F6FB", fontSize: 14, fontWeight: 700, mb: 1.2 }}>
+              Status Distribution
+            </Typography>
+            <ResponsiveContainer width="100%" height="88%">
+              <PieChart>
+                <Pie data={statusData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={90} label>
+                  {statusData.map((_, i) => (
+                    <Cell key={`pie-${i}`} fill={CHART_COLORS[i % CHART_COLORS.length]} />
+                  ))}
+                </Pie>
+                <Tooltip />
+              </PieChart>
+            </ResponsiveContainer>
+          </Paper>
+        </Grid>
+
+        <Grid item xs={12}>
+          <Paper
+            elevation={0}
+            sx={{
+              p: 2,
+              borderRadius: 2,
+              border: "1px solid rgba(201,168,76,0.18)",
+              bgcolor: "rgba(26,37,64,0.6)",
+              height: 270,
+            }}
+          >
+            <Typography sx={{ color: "#F4F6FB", fontSize: 14, fontWeight: 700, mb: 1.2 }}>
+              Urgency Mix
+            </Typography>
+            <ResponsiveContainer width="100%" height="86%">
+              <BarChart data={urgencyData}>
+                <XAxis dataKey="name" stroke="#8B9AB5" fontSize={11} />
+                <YAxis stroke="#8B9AB5" fontSize={11} />
+                <Tooltip />
+                <Bar dataKey="value" radius={[6, 6, 0, 0]}>
+                  {urgencyData.map((_, i) => (
+                    <Cell key={`urg-${i}`} fill={CHART_COLORS[(i + 2) % CHART_COLORS.length]} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </Paper>
+        </Grid>
+      </Grid>
+    </Box>
   );
 }
+

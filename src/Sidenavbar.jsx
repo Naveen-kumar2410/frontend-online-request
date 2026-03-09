@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { NavLink, useLocation, useNavigate, Outlet } from "react-router-dom";
 import {
   Box,
@@ -34,30 +34,8 @@ import {
   Search as SearchIcon,
   Notifications as NotificationsIcon,
 } from "@mui/icons-material";
-
-const NAV_SECTIONS = [
-  {
-    label: "Main",
-    items: [
-      { path: "/home", label: "Home", icon: <HomeIcon /> },
-      { path: "/dashboard", label: "Dashboard", icon: <DashboardIcon /> },
-      { path: "/approvals", label: "My Approvals", icon: <CheckCircleIcon />, badge: 9 },
-      // Removed "New Request" from here
-    ],
-  },
-  {
-    label: "Insights",
-    items: [
-      { path: "/reports", label: "Reports", icon: <AssessmentIcon /> },
-    ],
-  },
-  {
-    label: "System",
-    items: [
-      { path: "/admin", label: "Admin", icon: <SettingsIcon /> },
-    ],
-  },
-];
+import { clearStoredAuth, getStoredAuth } from "./lib/authStorage";
+import { getAdminRequests, getUserRequests } from "./api/requestApi";
 
 export default function Sidenavbar() {
   const theme = useTheme();
@@ -65,11 +43,87 @@ export default function Sidenavbar() {
   const [collapsed, setCollapsed] = useState(false);
   const [anchorEl, setAnchorEl] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [notifications, setNotifications] = useState([]);
   const location = useLocation();
   
   // Responsive breakpoints
   const isSmallScreen = useMediaQuery(theme.breakpoints.down("md"));
   const isVerySmallScreen = useMediaQuery(theme.breakpoints.down("sm"));
+  const auth = useMemo(() => getStoredAuth(), []);
+  const isAdmin = auth?.role === "ADMIN";
+  const navSections = isAdmin
+    ? [
+        {
+          label: "Main",
+          items: [
+            { path: "/overview", label: "Overview", icon: <HomeIcon /> },
+            { path: "/dashboard", label: "Dashboard", icon: <DashboardIcon /> },
+            { path: "/reports", label: "Reports", icon: <AssessmentIcon /> },
+          ],
+        },
+        {
+          label: "System",
+          items: [{ path: "/admin", label: "Admin", icon: <SettingsIcon /> }],
+        },
+      ]
+    : [
+        {
+          label: "Main",
+          items: [
+            { path: "/overview", label: "Overview", icon: <HomeIcon /> },
+            { path: "/dashboard", label: "Dashboard", icon: <DashboardIcon /> },
+            { path: "/new-request", label: "New Request", icon: <AddIcon /> },
+            { path: "/approvals", label: "My Requests", icon: <CheckCircleIcon /> },
+          ],
+        },
+        {
+          label: "Insights",
+          items: [{ path: "/reports", label: "Reports", icon: <AssessmentIcon /> }],
+        },
+      ];
+
+  useEffect(() => {
+    async function loadNotifications() {
+      try {
+        const rows =
+          auth?.role === "ADMIN" ? await getAdminRequests(auth) : await getUserRequests(auth);
+        const pending = rows.filter((r) => r.status === "PENDING").length;
+        const approved = rows.filter((r) => r.status === "APPROVED").length;
+        const rejected = rows.filter((r) => r.status === "REJECTED").length;
+        const next = [];
+
+        if (auth?.role === "ADMIN" && pending > 0) {
+          next.push({
+            title: `${pending} request(s) waiting for your approval`,
+            time: "Now",
+          });
+        }
+        if (auth?.role !== "ADMIN" && pending > 0) {
+          next.push({
+            title: `${pending} request(s) currently in review`,
+            time: "Now",
+          });
+        }
+        if (approved > 0) {
+          next.push({
+            title: `${approved} request(s) approved`,
+            time: "Today",
+          });
+        }
+        if (rejected > 0) {
+          next.push({
+            title: `${rejected} request(s) rejected`,
+            time: "Today",
+          });
+        }
+
+        setNotifications(next.slice(0, 3));
+      } catch {
+        setNotifications([]);
+      }
+    }
+    loadNotifications();
+  }, [auth]);
 
   const handleNotificationClick = (event) => {
     setAnchorEl(event.currentTarget);
@@ -79,17 +133,19 @@ export default function Sidenavbar() {
     setAnchorEl(null);
   };
 
-  const handleNewRequest = () => {
-    // Navigate to new request page
-    navigate("/new-request");
+  const handleNewRequest = () => navigate("/new-request");
+
+  const handleLogout = () => {
+    clearStoredAuth();
+    navigate("/signin");
   };
 
   const getCurrentPageTitle = () => {
-    const allItems = NAV_SECTIONS.flatMap(section => section.items);
+    const allItems = navSections.flatMap(section => section.items);
     const currentItem = allItems.find(item => 
       location.pathname === item.path || location.pathname.startsWith(item.path + "/")
     );
-    return currentItem ? currentItem.label : "Home";
+    return currentItem ? currentItem.label : "Overview";
   };
 
   const drawerWidth = collapsed ? 80 : 260;
@@ -190,7 +246,7 @@ export default function Sidenavbar() {
 
         {/* Navigation */}
         <Box sx={{ flex: 1, py: 2, px: collapsed ? 1 : 2, overflowY: "auto", overflowX: "hidden" }}>
-          {NAV_SECTIONS.map((section) => (
+          {navSections.filter((section) => section.items.length > 0).map((section) => (
             <Box key={section.label} sx={{ mb: 2 }}>
               {!collapsed && (
                 <Typography
@@ -322,18 +378,27 @@ export default function Sidenavbar() {
               fontWeight: 700,
             }}
           >
-            RP
+            NMV
           </Avatar>
 
           {!collapsed && (
             <Box>
               <Typography sx={{ fontSize: 12, fontWeight: 600, color: "#F4F6FB" }}>
-                Ravi Pillai
+                {auth?.email || "Not Connected"}
               </Typography>
               <Typography sx={{ fontSize: 10, color: "#8B9AB5" }}>
-                Finance Controller
+                {auth?.role || "Signed In"}
               </Typography>
             </Box>
+          )}
+          {!collapsed && (
+            <Button
+              size="small"
+              onClick={handleLogout}
+              sx={{ ml: "auto", minWidth: 0, fontSize: 10, color: "#F87171" }}
+            >
+              Logout
+            </Button>
           )}
         </Box>
       </Drawer>
@@ -379,31 +444,33 @@ export default function Sidenavbar() {
             flexShrink: 0,
           }}>
             {/* New Request Button - Added here before search */}
-            <Button
-              variant="contained"
-              size="small"
-              startIcon={<AddIcon />}
-              onClick={handleNewRequest}
-              component={NavLink}
-              to="/new-request"
-              sx={{
-                background: "linear-gradient(135deg, #C9A84C, #E4C97A)",
-                color: "#0A0F1E",
-                fontWeight: 600,
-                fontSize: "13px",
-                textTransform: "none",
-                px: 2,
-                py: 1,
-                minWidth: isVerySmallScreen ? "40px" : "120px",
-                "&:hover": {
-                  background: "linear-gradient(135deg, #b5943a, #d4b561)",
-                },
-                mr: 1,
-                textDecoration: "none",
-              }}
-            >
-              {isVerySmallScreen ? <AddIcon /> : "New Request"}
-            </Button>
+            {!isAdmin && (
+              <Button
+                variant="contained"
+                size="small"
+                startIcon={<AddIcon />}
+                onClick={handleNewRequest}
+                component={NavLink}
+                to="/new-request"
+                sx={{
+                  background: "linear-gradient(135deg, #C9A84C, #E4C97A)",
+                  color: "#0A0F1E",
+                  fontWeight: 600,
+                  fontSize: "13px",
+                  textTransform: "none",
+                  px: 2,
+                  py: 1,
+                  minWidth: isVerySmallScreen ? "40px" : "120px",
+                  "&:hover": {
+                    background: "linear-gradient(135deg, #b5943a, #d4b561)",
+                  },
+                  mr: 1,
+                  textDecoration: "none",
+                }}
+              >
+                {isVerySmallScreen ? <AddIcon /> : "New Request"}
+              </Button>
+            )}
 
             {/* Search - Responsive width */}
             {!isVerySmallScreen && (
@@ -457,7 +524,7 @@ export default function Sidenavbar() {
                 },
               }}
             >
-              <Badge badgeContent={3} color="error">
+              <Badge badgeContent={notifications.length} color="error">
                 <NotificationsIcon sx={{ color: "#C9A84C", fontSize: 20 }} />
               </Badge>
             </IconButton>
@@ -476,7 +543,7 @@ export default function Sidenavbar() {
                 flexShrink: 0,
               }}
             >
-              RP
+              NMV
             </Avatar>
           </Box>
         </Paper>
@@ -511,40 +578,33 @@ export default function Sidenavbar() {
       >
         <Box sx={{ p: 2, borderBottom: "1px solid rgba(201,168,76,0.18)" }}>
           <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
-            Notifications (3)
+            Notifications ({notifications.length})
           </Typography>
         </Box>
-        
-        <MenuItem sx={{ flexDirection: "column", alignItems: "flex-start", py: 1.5 }}>
-          <Typography variant="body2" sx={{ color: "#F4F6FB", mb: 0.5 }}>
-            New approval request from John
-          </Typography>
-          <Typography variant="caption" sx={{ color: "#8B9AB5" }}>
-            2 min ago
-          </Typography>
-        </MenuItem>
-        
-        <Divider sx={{ borderColor: "rgba(201,168,76,0.10)" }} />
-        
-        <MenuItem sx={{ flexDirection: "column", alignItems: "flex-start", py: 1.5 }}>
-          <Typography variant="body2" sx={{ color: "#F4F6FB", mb: 0.5 }}>
-            Monthly report ready for review
-          </Typography>
-          <Typography variant="caption" sx={{ color: "#8B9AB5" }}>
-            1 hour ago
-          </Typography>
-        </MenuItem>
-        
-        <Divider sx={{ borderColor: "rgba(201,168,76,0.10)" }} />
-        
-        <MenuItem sx={{ flexDirection: "column", alignItems: "flex-start", py: 1.5 }}>
-          <Typography variant="body2" sx={{ color: "#F4F6FB", mb: 0.5 }}>
-            System update completed successfully
-          </Typography>
-          <Typography variant="caption" sx={{ color: "#8B9AB5" }}>
-            Yesterday
-          </Typography>
-        </MenuItem>
+
+        {notifications.length === 0 && (
+          <MenuItem sx={{ py: 1.5 }}>
+            <Typography variant="body2" sx={{ color: "#8B9AB5" }}>
+              No new notifications
+            </Typography>
+          </MenuItem>
+        )}
+
+        {notifications.map((item, index) => (
+          <Box key={`${item.title}-${index}`}>
+            <MenuItem sx={{ flexDirection: "column", alignItems: "flex-start", py: 1.5 }}>
+              <Typography variant="body2" sx={{ color: "#F4F6FB", mb: 0.5 }}>
+                {item.title}
+              </Typography>
+              <Typography variant="caption" sx={{ color: "#8B9AB5" }}>
+                {item.time}
+              </Typography>
+            </MenuItem>
+            {index < notifications.length - 1 && (
+              <Divider sx={{ borderColor: "rgba(201,168,76,0.10)" }} />
+            )}
+          </Box>
+        ))}
       </Menu>
     </Box>
   );

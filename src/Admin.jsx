@@ -1,798 +1,374 @@
-import React, { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
+  Alert,
   Box,
-  Typography,
-  Paper,
   Button,
-  Tabs,
-  Tab,
+  Chip,
+  Drawer,
+  Grid,
+  MenuItem,
+  Paper,
+  Stack,
   Table,
   TableBody,
   TableCell,
   TableContainer,
   TableHead,
   TableRow,
-  Chip,
-  Switch,
   TextField,
-  Grid,
-  IconButton,
-  Divider,
-  useTheme,
-  alpha,
+  Typography,
 } from "@mui/material";
-import {
-  Save as SaveIcon,
-  Add as AddIcon,
-  Edit as EditIcon,
-  Business as BusinessIcon,
-  People as PeopleIcon,
-  Rule as RuleIcon,
-  Settings as SettingsIcon,
-} from "@mui/icons-material";
+import { decideRequest, getAdminRequests } from "./api/requestApi";
+import { getStoredAuth } from "./lib/authStorage";
 
-// Tab Panel Component
-function TabPanel({ children, value, index, ...other }) {
-  return (
-    <div
-      role="tabpanel"
-      hidden={value !== index}
-      id={`admin-tabpanel-${index}`}
-      aria-labelledby={`admin-tab-${index}`}
-      {...other}
-    >
-      {value === index && <Box sx={{ pt: 3 }}>{children}</Box>}
-    </div>
-  );
+function statusChipStyle(status) {
+  if (status === "APPROVED") return { bg: "rgba(74,222,128,0.12)", color: "#4ADE80" };
+  if (status === "REJECTED") return { bg: "rgba(248,113,113,0.12)", color: "#F87171" };
+  return { bg: "rgba(252,211,77,0.12)", color: "#FCD34D" };
 }
 
 export default function Admin() {
-  const theme = useTheme();
-  const [tabValue, setTabValue] = useState(0);
-  const [toast, setToast] = useState({ show: false, message: "", type: "" });
+  const [requests, setRequests] = useState([]);
+  const [selectedRequestor, setSelectedRequestor] = useState("");
+  const [selectedRequest, setSelectedRequest] = useState(null);
+  const [decision, setDecision] = useState({});
+  const [comment, setComment] = useState({});
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  const handleTabChange = (event, newValue) => {
-    setTabValue(newValue);
+  const auth = useMemo(() => getStoredAuth(), []);
+
+  const fetchRequests = async () => {
+    setError("");
+    setLoading(true);
+    try {
+      const data = await getAdminRequests(auth);
+      setRequests(data || []);
+    } catch (err) {
+      setError(err.message || "Failed to load admin requests");
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const showToast = (message, type) => {
-    // This would be connected to your actual toast system
-    console.log(`Toast: ${message} (${type})`);
-    // For demonstration, we'll use a simple alert
-    alert(message);
+  useEffect(() => {
+    fetchRequests();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const submitDecision = async (id) => {
+    const selectedDecision = decision[id];
+    if (!selectedDecision) {
+      setError("Select APPROVED or REJECTED before submit.");
+      return;
+    }
+
+    setError("");
+    setMessage("");
+    setLoading(true);
+    try {
+      await decideRequest(
+        id,
+        { decision: selectedDecision, comment: comment[id] || "" },
+        auth
+      );
+      setMessage(`Request ${id} updated.`);
+      await fetchRequests();
+    } catch (err) {
+      setError(err.message || "Failed to update request");
+    } finally {
+      setLoading(false);
+    }
   };
 
-  // Hierarchy data
-  const hierarchyLevels = [
-    {
-      level: 5,
-      title: "Chief Executive Officer",
-      subtitle: "Level 5 · Final Authority",
-      dotColor: "#C9A84C",
-      type: "single",
+  const pending = requests.filter((r) => r.status === "PENDING").length;
+  const approved = requests.filter((r) => r.status === "APPROVED").length;
+  const rejected = requests.filter((r) => r.status === "REJECTED").length;
+  const total = requests.length;
+  const requestorStats = Object.entries(
+    requests.reduce((acc, row) => {
+      const key = row.createdBy || "Unknown";
+      acc[key] = (acc[key] || 0) + 1;
+      return acc;
+    }, {})
+  ).sort((a, b) => b[1] - a[1]);
+  const visibleRequests = selectedRequestor
+    ? requests.filter((r) => r.createdBy === selectedRequestor)
+    : requests;
+  const selectedStats = visibleRequests.reduce(
+    (acc, row) => {
+      acc.total += 1;
+      if (row.status === "PENDING") acc.pending += 1;
+      if (row.status === "APPROVED") acc.approved += 1;
+      if (row.status === "REJECTED") acc.rejected += 1;
+      return acc;
     },
-    {
-      level: 4,
-      nodes: [
-        { title: "VP / Director", subtitle: "Level 4 · Strategic", dotColor: "#2DD4BF" },
-        { title: "Finance Controller", subtitle: "Level 4 · Budget >₹1L", dotColor: "#2DD4BF" },
-      ],
-    },
-    {
-      level: 3,
-      nodes: [
-        { title: "IT Manager", subtitle: "Level 3", dotColor: "#818CF8" },
-        { title: "HR Manager", subtitle: "Level 3", dotColor: "#818CF8" },
-        { title: "Dept Manager", subtitle: "Level 3", dotColor: "#818CF8" },
-      ],
-    },
-    {
-      level: 2,
-      nodes: [
-        { title: "Team Lead", subtitle: "Level 2 · First Reviewer", dotColor: "#8B9AB5" },
-        { title: "Project Lead", subtitle: "Level 2 · First Reviewer", dotColor: "#8B9AB5" },
-      ],
-    },
-    {
-      level: 1,
-      title: "Employee / Staff",
-      subtitle: "Level 1 · Requestor",
-      dotColor: "#8B9AB5",
-      type: "single",
-    },
-  ];
-
-  // Users data
-  const usersData = [
-    { name: "Meena Iyer", email: "meena@oahs.in", dept: "Executive", role: "CEO · L5", roleType: "review", status: "Active", statusType: "approved" },
-    { name: "Ravi Pillai", email: "ravi@oahs.in", dept: "Finance", role: "Controller · L4", roleType: "review", status: "Active", statusType: "approved" },
-    { name: "Priya Sharma", email: "priya@oahs.in", dept: "IT", role: "Manager · L3", roleType: "draft", status: "Active", statusType: "approved" },
-    { name: "Arun Kumar", email: "arun@oahs.in", dept: "IT", role: "Lead · L2", roleType: "draft", status: "Active", statusType: "approved" },
-    { name: "Deepa Nair", email: "deepa@oahs.in", dept: "HR", role: "Employee · L1", roleType: "draft", status: "On Leave", statusType: "pending" },
-  ];
-
-  // Rules data
-  const rulesData = [
-    { rule: "High-Value Procurement", category: "Procurement", condition: "Amount > ₹1,00,000", route: "TL → Mgr → Finance → CEO", sla: "24h", status: "Active", statusType: "approved" },
-    { rule: "Standard Procurement", category: "Procurement", condition: "Amount ≤ ₹1,00,000", route: "TL → Mgr → Finance", sla: "12h", status: "Active", statusType: "approved" },
-    { rule: "Short Leave", category: "Leave", condition: "Duration ≤ 3 days", route: "TL only", sla: "4h", status: "Active", statusType: "approved" },
-    { rule: "Extended Leave", category: "Leave", condition: "Duration > 3 days", route: "TL → HR Manager", sla: "8h", status: "Active", statusType: "approved" },
-    { rule: "IT Hardware", category: "IT Asset", condition: "All amounts", route: "TL → IT Mgr → Finance", sla: "16h", status: "Draft", statusType: "draft" },
-  ];
-
-  const getStatusChip = (type, label) => {
-    const colors = {
-      approved: { bg: "rgba(74,222,128,0.12)", color: "#4ADE80" },
-      review: { bg: "rgba(45,212,191,0.10)", color: "#2DD4BF" },
-      pending: { bg: "rgba(252,211,77,0.12)", color: "#FCD34D" },
-      draft: { bg: "rgba(139,154,181,0.12)", color: "#8B9AB5" },
-    };
-    return (
-      <Chip
-        label={label}
-        size="small"
-        sx={{
-          bgcolor: colors[type]?.bg || colors.draft.bg,
-          color: colors[type]?.color || colors.draft.color,
-          fontWeight: 600,
-          fontSize: "11px",
-          height: "22px",
-          "& .MuiChip-label": { px: 1 },
-        }}
-      />
-    );
+    { total: 0, pending: 0, approved: 0, rejected: 0 }
+  );
+  const formatDateTime = (value) => {
+    if (!value) return "-";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return String(value);
+    return date.toLocaleString();
   };
 
   return (
-    <Box sx={{ p: 3, height: "100%", width: "100%", overflow: "auto", boxSizing: "border-box" }}>
-      {/* Header */}
-      <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 2.5 }}>
-        <Box>
-          <Typography
-            variant="h5"
+    <Box sx={{ p: 3 }}>
+      <Typography
+        variant="h5"
+        sx={{ fontFamily: "'Syne', sans-serif", fontSize: "20px", fontWeight: 800, color: "#F4F6FB", mb: 0.5 }}
+      >
+        Admin Panel
+      </Typography>
+      <Typography sx={{ fontSize: "12px", color: "#8B9AB5", mb: 2.5 }}>
+        All requests across users with admin decision controls
+      </Typography>
+      {selectedRequestor && (
+        <Alert
+          severity="info"
+          sx={{ mb: 2 }}
+          action={
+            <Button size="small" color="inherit" onClick={() => setSelectedRequestor("")}>
+              Clear
+            </Button>
+          }
+        >
+          Showing details for requestor: {selectedRequestor}
+        </Alert>
+      )}
+
+      {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+      {message && <Alert severity="success" sx={{ mb: 2 }}>{message}</Alert>}
+
+      <Stack direction="row" spacing={1.5} sx={{ mb: 2 }}>
+        <Chip label={`Total: ${total}`} sx={{ bgcolor: "rgba(129,140,248,0.12)", color: "#818CF8" }} />
+        <Chip label={`Pending: ${pending}`} sx={{ bgcolor: "rgba(252,211,77,0.12)", color: "#FCD34D" }} />
+        <Chip label={`Approved: ${approved}`} sx={{ bgcolor: "rgba(74,222,128,0.12)", color: "#4ADE80" }} />
+        <Chip label={`Rejected: ${rejected}`} sx={{ bgcolor: "rgba(248,113,113,0.12)", color: "#F87171" }} />
+      </Stack>
+
+      <Grid container spacing={2}>
+        <Grid item xs={12} lg={9}>
+          <TableContainer
+            component={Paper}
             sx={{
-              fontFamily: "'Syne', sans-serif",
-              fontSize: "20px",
-              fontWeight: 800,
-              color: "#F4F6FB",
+              border: "1px solid rgba(201,168,76,0.20)",
+              borderRadius: 2,
+              bgcolor: "rgba(26,37,64,0.6)",
             }}
           >
-            Admin Panel
-          </Typography>
-          <Typography sx={{ fontSize: "12px", color: "#8B9AB5", mt: 0.5 }}>
-            Hierarchy, users & system configuration
-          </Typography>
-        </Box>
-        <Button
-          variant="contained"
-          startIcon={<SaveIcon />}
-          onClick={() => showToast("Changes saved!", "ok")}
-          size="small"
-          sx={{
-            background: "linear-gradient(135deg, #C9A84C, #E4C97A)",
-            color: "#0A0F1E",
-            fontWeight: 600,
-            fontSize: "12px",
-            textTransform: "none",
-            px: 2,
-            "&:hover": {
-              background: "linear-gradient(135deg, #b5943a, #d4b561)",
-            },
-          }}
-        >
-          Save
-        </Button>
-      </Box>
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell>ID</TableCell>
+                  <TableCell>Title</TableCell>
+                  <TableCell>Type</TableCell>
+                  <TableCell>Urgency</TableCell>
+                  <TableCell>Status</TableCell>
+                  <TableCell>Created By</TableCell>
+                  <TableCell>Decision</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {visibleRequests.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={7} align="center">
+                      {loading ? "Loading..." : "No requests found for selected requestor"}
+                    </TableCell>
+                  </TableRow>
+                )}
+                {visibleRequests.map((row) => {
+                  const colors = statusChipStyle(row.status);
+                  return (
+                    <TableRow
+                      key={row.id}
+                      onClick={() => setSelectedRequest(row)}
+                      sx={{
+                        cursor: "pointer",
+                        "&:hover": { backgroundColor: "rgba(201,168,76,0.05)" },
+                      }}
+                    >
+                      <TableCell sx={{ color: "#E4C97A", fontWeight: 700 }}>{row.id}</TableCell>
+                      <TableCell>{row.title}</TableCell>
+                      <TableCell>{row.requestType}</TableCell>
+                      <TableCell>{row.urgency}</TableCell>
+                      <TableCell>
+                        <Chip label={row.status} size="small" sx={{ bgcolor: colors.bg, color: colors.color }} />
+                      </TableCell>
+                      <TableCell>{row.createdBy}</TableCell>
+                      <TableCell onClick={(e) => e.stopPropagation()}>
+                        <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems="center">
+                          <TextField
+                            select
+                            value={decision[row.id] || ""}
+                            onChange={(e) =>
+                              setDecision((prev) => ({ ...prev, [row.id]: e.target.value }))
+                            }
+                            size="small"
+                            sx={{ minWidth: 130 }}
+                          >
+                            <MenuItem value="">Select</MenuItem>
+                            <MenuItem value="APPROVED">APPROVED</MenuItem>
+                            <MenuItem value="REJECTED">REJECTED</MenuItem>
+                          </TextField>
+                          <TextField
+                            size="small"
+                            placeholder="Comment"
+                            value={comment[row.id] || ""}
+                            onChange={(e) =>
+                              setComment((prev) => ({ ...prev, [row.id]: e.target.value }))
+                            }
+                          />
+                          <Button
+                            size="small"
+                            variant="contained"
+                            disabled={loading}
+                            onClick={() => submitDecision(row.id)}
+                            sx={{
+                              background: "linear-gradient(135deg, #C9A84C, #E4C97A)",
+                              color: "#0A0F1E",
+                              fontWeight: 700,
+                            }}
+                          >
+                            Apply
+                          </Button>
+                        </Stack>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </Grid>
 
-      {/* Tabs */}
-      <Paper
-        elevation={0}
-        sx={{
-          bgcolor: "transparent",
-          borderBottom: "1px solid rgba(201,168,76,0.15)",
-          borderRadius: 0,
+        <Grid item xs={12} lg={3}>
+          <Paper
+            elevation={0}
+            sx={{
+              border: "1px solid rgba(201,168,76,0.20)",
+              borderRadius: 2,
+              bgcolor: "rgba(26,37,64,0.6)",
+              p: 2,
+            }}
+          >
+            <Typography sx={{ color: "#F4F6FB", fontWeight: 700, mb: 1.2 }}>
+              Requestors
+            </Typography>
+            {selectedRequestor && (
+              <Box sx={{ mb: 1.5 }}>
+                <Typography sx={{ color: "#E4C97A", fontSize: 12, fontWeight: 700 }}>
+                  {selectedRequestor}
+                </Typography>
+                <Stack direction="row" spacing={0.8} sx={{ mt: 0.8, flexWrap: "wrap" }}>
+                  <Chip size="small" label={`Total ${selectedStats.total}`} sx={{ height: 20 }} />
+                  <Chip size="small" label={`P ${selectedStats.pending}`} sx={{ height: 20 }} />
+                  <Chip size="small" label={`A ${selectedStats.approved}`} sx={{ height: 20 }} />
+                  <Chip size="small" label={`R ${selectedStats.rejected}`} sx={{ height: 20 }} />
+                </Stack>
+              </Box>
+            )}
+            {requestorStats.length === 0 && (
+              <Typography sx={{ color: "#8B9AB5", fontSize: 12 }}>No requestor data</Typography>
+            )}
+            <Stack spacing={1}>
+              {requestorStats.map(([email, count]) => (
+                <Box
+                  key={email}
+                  onClick={() => setSelectedRequestor(email)}
+                  sx={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    gap: 1,
+                    p: 0.8,
+                    borderRadius: 1,
+                    cursor: "pointer",
+                    bgcolor: selectedRequestor === email ? "rgba(201,168,76,0.18)" : "transparent",
+                    border: selectedRequestor === email ? "1px solid rgba(201,168,76,0.35)" : "1px solid transparent",
+                    "&:hover": { bgcolor: "rgba(201,168,76,0.10)" },
+                  }}
+                >
+                  <Typography sx={{ color: "#8B9AB5", fontSize: 12, overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {email}
+                  </Typography>
+                  <Chip
+                    size="small"
+                    label={count}
+                    sx={{ bgcolor: "rgba(201,168,76,0.15)", color: "#E4C97A", height: 20 }}
+                  />
+                </Box>
+              ))}
+            </Stack>
+          </Paper>
+        </Grid>
+      </Grid>
+
+      <Drawer
+        anchor="right"
+        open={Boolean(selectedRequest)}
+        onClose={() => setSelectedRequest(null)}
+        PaperProps={{
+          sx: {
+            width: { xs: "100%", sm: 420 },
+            bgcolor: "#111827",
+            borderLeft: "1px solid rgba(201,168,76,0.20)",
+            color: "#F4F6FB",
+          },
         }}
       >
-        <Tabs
-          value={tabValue}
-          onChange={handleTabChange}
-          textColor="inherit"
-          sx={{
-            "& .MuiTab-root": {
-              color: "#8B9AB5",
-              fontWeight: 600,
-              fontSize: "13px",
-              textTransform: "none",
-              minHeight: "48px",
-              "&.Mui-selected": {
-                color: "#E4C97A",
-              },
-            },
-            "& .MuiTabs-indicator": {
-              backgroundColor: "#C9A84C",
-            },
-          }}
-        >
-          <Tab icon={<BusinessIcon sx={{ fontSize: 18, mr: 0.5 }} />} iconPosition="start" label="Hierarchy" />
-          <Tab icon={<PeopleIcon sx={{ fontSize: 18, mr: 0.5 }} />} iconPosition="start" label="Users" />
-          <Tab icon={<RuleIcon sx={{ fontSize: 18, mr: 0.5 }} />} iconPosition="start" label="Rules" />
-          <Tab icon={<SettingsIcon sx={{ fontSize: 18, mr: 0.5 }} />} iconPosition="start" label="Settings" />
-        </Tabs>
-      </Paper>
-
-      {/* Hierarchy Tab */}
-      <TabPanel value={tabValue} index={0}>
-        <Paper
-          elevation={0}
-          sx={{
-            p: 2.5,
-            bgcolor: "rgba(26,37,64,0.6)",
-            border: "1px solid rgba(201,168,76,0.20)",
-            borderRadius: 2,
-            backdropFilter: "blur(14px)",
-          }}
-        >
-          <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 3 }}>
-            <Typography
-              sx={{
-                fontFamily: "'Syne', sans-serif",
-                fontSize: "14px",
-                fontWeight: 700,
-                color: "#F4F6FB",
-              }}
-            >
-              Approval Hierarchy
+        {selectedRequest && (
+          <Box sx={{ p: 2.5 }}>
+            <Typography sx={{ fontFamily: "'Syne', sans-serif", fontSize: 18, fontWeight: 800, mb: 0.6 }}>
+              Request #{selectedRequest.id}
             </Typography>
+            <Typography sx={{ color: "#8B9AB5", fontSize: 12, mb: 2 }}>
+              Full request details
+            </Typography>
+
+            <Stack spacing={1.4}>
+              <DetailRow label="Title" value={selectedRequest.title} />
+              <DetailRow label="Description" value={selectedRequest.description || "-"} />
+              <DetailRow label="Type" value={selectedRequest.requestType} />
+              <DetailRow label="Urgency" value={selectedRequest.urgency} />
+              <DetailRow label="Status" value={selectedRequest.status} />
+              <DetailRow label="Created By" value={selectedRequest.createdBy} />
+              <DetailRow label="Stage Number" value={selectedRequest.stageNumber ?? "-"} />
+              <DetailRow label="Approval Comment" value={selectedRequest.approvalComment || "-"} />
+              <DetailRow label="Created At" value={formatDateTime(selectedRequest.createdAt)} />
+              <DetailRow label="Updated At" value={formatDateTime(selectedRequest.updatedAt)} />
+            </Stack>
+
             <Button
-              variant="contained"
-              startIcon={<AddIcon />}
-              onClick={() => showToast("Level added!", "ok")}
-              size="small"
-              sx={{
-                background: "linear-gradient(135deg, #C9A84C, #E4C97A)",
-                color: "#0A0F1E",
-                fontWeight: 600,
-                fontSize: "11px",
-                textTransform: "none",
-                "&:hover": {
-                  background: "linear-gradient(135deg, #b5943a, #d4b561)",
-                },
-              }}
+              onClick={() => setSelectedRequest(null)}
+              sx={{ mt: 2, color: "#E4C97A", borderColor: "rgba(201,168,76,0.30)" }}
+              variant="outlined"
+              fullWidth
             >
-              Add Level
+              Close
             </Button>
           </Box>
+        )}
+      </Drawer>
+    </Box>
+  );
+}
 
-          <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
-            {hierarchyLevels.map((level, idx) => (
-              <React.Fragment key={idx}>
-                {idx > 0 && (
-                  <Box sx={{ my: 1, color: "#8B9AB5", fontSize: "14px" }}>↓</Box>
-                )}
-                
-                <Box sx={{ display: "flex", gap: 2, justifyContent: "center", flexWrap: "wrap" }}>
-                  {level.type === "single" ? (
-                    <Paper
-                      elevation={0}
-                      onClick={() => showToast(`Editing ${level.title}…`, "info")}
-                      sx={{
-                        p: 2,
-                        bgcolor: "rgba(26,37,64,0.8)",
-                        border: "1px solid rgba(255,255,255,0.05)",
-                        borderRadius: 2,
-                        cursor: "pointer",
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 1.5,
-                        minWidth: "200px",
-                        "&:hover": {
-                          borderColor: "rgba(201,168,76,0.3)",
-                          bgcolor: "rgba(26,37,64,0.9)",
-                        },
-                      }}
-                    >
-                      <Box
-                        sx={{
-                          width: 10,
-                          height: 10,
-                          borderRadius: "50%",
-                          bgcolor: level.dotColor,
-                          flexShrink: 0,
-                        }}
-                      />
-                      <Box>
-                        <Typography sx={{ fontSize: "13px", fontWeight: 600, color: "#F4F6FB" }}>
-                          {level.title}
-                        </Typography>
-                        <Typography sx={{ fontSize: "11px", color: "#8B9AB5" }}>
-                          {level.subtitle}
-                        </Typography>
-                      </Box>
-                    </Paper>
-                  ) : (
-                    level.nodes.map((node, nodeIdx) => (
-                      <Paper
-                        key={nodeIdx}
-                        elevation={0}
-                        onClick={() => showToast(`Editing ${node.title}…`, "info")}
-                        sx={{
-                          p: 2,
-                          bgcolor: "rgba(26,37,64,0.8)",
-                          border: "1px solid rgba(255,255,255,0.05)",
-                          borderRadius: 2,
-                          cursor: "pointer",
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 1.5,
-                          minWidth: "180px",
-                          "&:hover": {
-                            borderColor: "rgba(201,168,76,0.3)",
-                            bgcolor: "rgba(26,37,64,0.9)",
-                          },
-                        }}
-                      >
-                        <Box
-                          sx={{
-                            width: 10,
-                            height: 10,
-                            borderRadius: "50%",
-                            bgcolor: node.dotColor,
-                            flexShrink: 0,
-                          }}
-                        />
-                        <Box>
-                          <Typography sx={{ fontSize: "13px", fontWeight: 600, color: "#F4F6FB" }}>
-                            {node.title}
-                          </Typography>
-                          <Typography sx={{ fontSize: "11px", color: "#8B9AB5" }}>
-                            {node.subtitle}
-                          </Typography>
-                        </Box>
-                      </Paper>
-                    ))
-                  )}
-                </Box>
-              </React.Fragment>
-            ))}
-          </Box>
-        </Paper>
-      </TabPanel>
-
-      {/* Users Tab */}
-      <TabPanel value={tabValue} index={1}>
-        <Paper
-          elevation={0}
-          sx={{
-            p: 2.5,
-            bgcolor: "rgba(26,37,64,0.6)",
-            border: "1px solid rgba(201,168,76,0.20)",
-            borderRadius: 2,
-            backdropFilter: "blur(14px)",
-          }}
-        >
-          <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 2 }}>
-            <Typography
-              sx={{
-                fontFamily: "'Syne', sans-serif",
-                fontSize: "14px",
-                fontWeight: 700,
-                color: "#F4F6FB",
-              }}
-            >
-              Users
-            </Typography>
-            <Button
-              variant="contained"
-              startIcon={<AddIcon />}
-              onClick={() => showToast("Add user dialog", "info")}
-              size="small"
-              sx={{
-                background: "linear-gradient(135deg, #C9A84C, #E4C97A)",
-                color: "#0A0F1E",
-                fontWeight: 600,
-                fontSize: "11px",
-                textTransform: "none",
-                "&:hover": {
-                  background: "linear-gradient(135deg, #b5943a, #d4b561)",
-                },
-              }}
-            >
-              Add User
-            </Button>
-          </Box>
-
-          <TableContainer>
-            <Table size="small">
-              <TableHead>
-                <TableRow>
-                  {["Name", "Email", "Department", "Role", "Status", ""].map((header) => (
-                    <TableCell
-                      key={header}
-                      sx={{
-                        fontSize: "10px",
-                        fontWeight: 700,
-                        letterSpacing: "0.08em",
-                        textTransform: "uppercase",
-                        color: "#8B9AB5",
-                        bgcolor: "rgba(26,37,64,0.8)",
-                        borderBottom: "1px solid rgba(255,255,255,0.07)",
-                        py: 1.5,
-                      }}
-                    >
-                      {header}
-                    </TableCell>
-                  ))}
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {usersData.map((row, index) => (
-                  <TableRow
-                    key={index}
-                    sx={{
-                      "&:last-child td, &:last-child th": { border: 0 },
-                      "& td": { borderBottom: "1px solid rgba(255,255,255,0.07)" },
-                    }}
-                  >
-                    <TableCell sx={{ fontSize: "13px", fontWeight: 600, color: "#F4F6FB", py: 1.5 }}>
-                      {row.name}
-                    </TableCell>
-                    <TableCell sx={{ fontSize: "12px", color: "#8B9AB5", py: 1.5 }}>
-                      {row.email}
-                    </TableCell>
-                    <TableCell sx={{ fontSize: "12px", color: "#F4F6FB", py: 1.5 }}>
-                      {row.dept}
-                    </TableCell>
-                    <TableCell sx={{ py: 1.5 }}>
-                      {getStatusChip(row.roleType, row.role)}
-                    </TableCell>
-                    <TableCell sx={{ py: 1.5 }}>
-                      {getStatusChip(row.statusType, row.status)}
-                    </TableCell>
-                    <TableCell sx={{ py: 1.5 }}>
-                      <IconButton
-                        size="small"
-                        onClick={() => showToast(`Editing ${row.name}…`, "info")}
-                        sx={{
-                          color: "#8B9AB5",
-                          "&:hover": { color: "#C9A84C" },
-                        }}
-                      >
-                        <EditIcon sx={{ fontSize: 16 }} />
-                      </IconButton>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </TableContainer>
-        </Paper>
-      </TabPanel>
-
-      {/* Rules Tab */}
-      <TabPanel value={tabValue} index={2}>
-        <Paper
-          elevation={0}
-          sx={{
-            p: 2.5,
-            bgcolor: "rgba(26,37,64,0.6)",
-            border: "1px solid rgba(201,168,76,0.20)",
-            borderRadius: 2,
-            backdropFilter: "blur(14px)",
-          }}
-        >
-          <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 2 }}>
-            <Typography
-              sx={{
-                fontFamily: "'Syne', sans-serif",
-                fontSize: "14px",
-                fontWeight: 700,
-                color: "#F4F6FB",
-              }}
-            >
-              Workflow Routing Rules
-            </Typography>
-            <Button
-              variant="contained"
-              startIcon={<AddIcon />}
-              onClick={() => showToast("New rule created!", "ok")}
-              size="small"
-              sx={{
-                background: "linear-gradient(135deg, #C9A84C, #E4C97A)",
-                color: "#0A0F1E",
-                fontWeight: 600,
-                fontSize: "11px",
-                textTransform: "none",
-                "&:hover": {
-                  background: "linear-gradient(135deg, #b5943a, #d4b561)",
-                },
-              }}
-            >
-              Add Rule
-            </Button>
-          </Box>
-
-          <TableContainer>
-            <Table size="small">
-              <TableHead>
-                <TableRow>
-                  {["Rule", "Category", "Condition", "Route", "SLA", "Status"].map((header) => (
-                    <TableCell
-                      key={header}
-                      sx={{
-                        fontSize: "10px",
-                        fontWeight: 700,
-                        letterSpacing: "0.08em",
-                        textTransform: "uppercase",
-                        color: "#8B9AB5",
-                        bgcolor: "rgba(26,37,64,0.8)",
-                        borderBottom: "1px solid rgba(255,255,255,0.07)",
-                        py: 1.5,
-                      }}
-                    >
-                      {header}
-                    </TableCell>
-                  ))}
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {rulesData.map((row, index) => (
-                  <TableRow
-                    key={index}
-                    sx={{
-                      "&:last-child td, &:last-child th": { border: 0 },
-                      "& td": { borderBottom: "1px solid rgba(255,255,255,0.07)" },
-                    }}
-                  >
-                    <TableCell sx={{ fontSize: "13px", fontWeight: 600, color: "#F4F6FB", py: 1.5 }}>
-                      {row.rule}
-                    </TableCell>
-                    <TableCell sx={{ fontSize: "12px", color: "#8B9AB5", py: 1.5 }}>
-                      {row.category}
-                    </TableCell>
-                    <TableCell sx={{ fontSize: "12px", color: "#8B9AB5", py: 1.5 }}>
-                      {row.condition}
-                    </TableCell>
-                    <TableCell sx={{ fontSize: "12px", color: "#8B9AB5", py: 1.5 }}>
-                      {row.route}
-                    </TableCell>
-                    <TableCell sx={{ fontSize: "12px", color: "#F4F6FB", py: 1.5 }}>
-                      {row.sla}
-                    </TableCell>
-                    <TableCell sx={{ py: 1.5 }}>
-                      {getStatusChip(row.statusType, row.status)}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </TableContainer>
-        </Paper>
-      </TabPanel>
-
-      {/* Settings Tab */}
-      <TabPanel value={tabValue} index={3}>
-        <Grid container spacing={2}>
-          {/* Notifications */}
-          <Grid item xs={12} md={6}>
-            <Paper
-              elevation={0}
-              sx={{
-                p: 2.5,
-                bgcolor: "rgba(26,37,64,0.6)",
-                border: "1px solid rgba(201,168,76,0.20)",
-                borderRadius: 2,
-                backdropFilter: "blur(14px)",
-              }}
-            >
-              <Typography
-                sx={{
-                  fontFamily: "'Syne', sans-serif",
-                  fontSize: "14px",
-                  fontWeight: 700,
-                  color: "#F4F6FB",
-                  mb: 2,
-                }}
-              >
-                Notifications
-              </Typography>
-              
-              <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                {[
-                  { title: "Email Notifications", desc: "Send email on every status change", checked: true },
-                  { title: "SMS Alerts", desc: "SMS for urgent requests", checked: true },
-                  { title: "SLA Breach Alerts", desc: "Alert when approval exceeds SLA", checked: true },
-                  { title: "Daily Digest", desc: "Daily summary of pending items", checked: false },
-                ].map((item, idx) => (
-                  <Box
-                    key={idx}
-                    sx={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      py: 1,
-                      borderBottom: idx < 3 ? "1px solid rgba(255,255,255,0.05)" : "none",
-                    }}
-                  >
-                    <Box>
-                      <Typography sx={{ fontSize: "13px", fontWeight: 600, color: "#F4F6FB" }}>
-                        {item.title}
-                      </Typography>
-                      <Typography sx={{ fontSize: "11px", color: "#8B9AB5" }}>
-                        {item.desc}
-                      </Typography>
-                    </Box>
-                    <Switch
-                      defaultChecked={item.checked}
-                      sx={{
-                        "& .MuiSwitch-switchBase.Mui-checked": {
-                          color: "#C9A84C",
-                        },
-                        "& .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track": {
-                          backgroundColor: "rgba(201,168,76,0.4)",
-                        },
-                      }}
-                    />
-                  </Box>
-                ))}
-              </Box>
-            </Paper>
-          </Grid>
-
-          {/* Automation */}
-          <Grid item xs={12} md={6}>
-            <Paper
-              elevation={0}
-              sx={{
-                p: 2.5,
-                bgcolor: "rgba(26,37,64,0.6)",
-                border: "1px solid rgba(201,168,76,0.20)",
-                borderRadius: 2,
-                backdropFilter: "blur(14px)",
-              }}
-            >
-              <Typography
-                sx={{
-                  fontFamily: "'Syne', sans-serif",
-                  fontSize: "14px",
-                  fontWeight: 700,
-                  color: "#F4F6FB",
-                  mb: 2,
-                }}
-              >
-                Automation
-              </Typography>
-              
-              <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                {[
-                  { title: "Auto-Escalation", desc: "Escalate after SLA breach", checked: true },
-                  { title: "Delegate on Leave", desc: "Auto-delegate when approver on leave", checked: true },
-                  { title: "Parallel Approvals", desc: "Simultaneous multi-level review", checked: false },
-                  { title: "SAP ERP Sync", desc: "Sync approved requests to SAP", checked: true },
-                ].map((item, idx) => (
-                  <Box
-                    key={idx}
-                    sx={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      py: 1,
-                      borderBottom: idx < 3 ? "1px solid rgba(255,255,255,0.05)" : "none",
-                    }}
-                  >
-                    <Box>
-                      <Typography sx={{ fontSize: "13px", fontWeight: 600, color: "#F4F6FB" }}>
-                        {item.title}
-                      </Typography>
-                      <Typography sx={{ fontSize: "11px", color: "#8B9AB5" }}>
-                        {item.desc}
-                      </Typography>
-                    </Box>
-                    <Switch
-                      defaultChecked={item.checked}
-                      sx={{
-                        "& .MuiSwitch-switchBase.Mui-checked": {
-                          color: "#C9A84C",
-                        },
-                        "& .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track": {
-                          backgroundColor: "rgba(201,168,76,0.4)",
-                        },
-                      }}
-                    />
-                  </Box>
-                ))}
-              </Box>
-            </Paper>
-          </Grid>
-
-          {/* SLA Configuration */}
-          <Grid item xs={12}>
-            <Paper
-              elevation={0}
-              sx={{
-                p: 2.5,
-                bgcolor: "rgba(26,37,64,0.6)",
-                border: "1px solid rgba(201,168,76,0.20)",
-                borderRadius: 2,
-                backdropFilter: "blur(14px)",
-              }}
-            >
-              <Typography
-                sx={{
-                  fontFamily: "'Syne', sans-serif",
-                  fontSize: "14px",
-                  fontWeight: 700,
-                  color: "#F4F6FB",
-                  mb: 2,
-                }}
-              >
-                SLA Configuration
-              </Typography>
-
-              <Grid container spacing={2} sx={{ mb: 2 }}>
-                {[
-                  { label: "Procurement (hrs)", value: 24 },
-                  { label: "Leave (hrs)", value: 8 },
-                  { label: "Travel (hrs)", value: 48 },
-                  { label: "IT Asset (hrs)", value: 16 },
-                ].map((field, idx) => (
-                  <Grid item xs={12} sm={6} md={3} key={idx}>
-                    <TextField
-                      fullWidth
-                      label={field.label}
-                      type="number"
-                      defaultValue={field.value}
-                      size="small"
-                      InputLabelProps={{
-                        sx: {
-                          color: "#8B9AB5",
-                          fontSize: "11px",
-                          fontWeight: 600,
-                          textTransform: "uppercase",
-                          letterSpacing: "0.03em",
-                        },
-                      }}
-                      sx={{
-                        "& .MuiOutlinedInput-root": {
-                          color: "#F4F6FB",
-                          fontSize: "13px",
-                          bgcolor: "rgba(26,37,64,0.8)",
-                          "& fieldset": {
-                            borderColor: "rgba(255,255,255,0.08)",
-                          },
-                          "&:hover fieldset": {
-                            borderColor: "rgba(201,168,76,0.3)",
-                          },
-                          "&.Mui-focused fieldset": {
-                            borderColor: "#C9A84C",
-                          },
-                        },
-                      }}
-                    />
-                  </Grid>
-                ))}
-              </Grid>
-
-              <Button
-                variant="contained"
-                onClick={() => showToast("SLA saved!", "ok")}
-                size="small"
-                sx={{
-                  background: "linear-gradient(135deg, #C9A84C, #E4C97A)",
-                  color: "#0A0F1E",
-                  fontWeight: 600,
-                  fontSize: "12px",
-                  textTransform: "none",
-                  "&:hover": {
-                    background: "linear-gradient(135deg, #b5943a, #d4b561)",
-                  },
-                }}
-              >
-                Save SLA
-              </Button>
-            </Paper>
-          </Grid>
-        </Grid>
-      </TabPanel>
+function DetailRow({ label, value }) {
+  return (
+    <Box
+      sx={{
+        border: "1px solid rgba(255,255,255,0.08)",
+        borderRadius: 1.2,
+        p: 1.2,
+        bgcolor: "rgba(26,37,64,0.55)",
+      }}
+    >
+      <Typography sx={{ fontSize: 10, color: "#8B9AB5", textTransform: "uppercase", letterSpacing: ".08em" }}>
+        {label}
+      </Typography>
+      <Typography sx={{ fontSize: 13, color: "#F4F6FB", mt: 0.5, wordBreak: "break-word" }}>
+        {value}
+      </Typography>
     </Box>
   );
 }

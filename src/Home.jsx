@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 const styles = {
   homeContainer: {
@@ -215,8 +216,9 @@ const styles = {
   },
 };
 
-export default function Home({ go, toast }) {
+export default function Home() {
   const [hoveredFeat, setHoveredFeat] = useState(null);
+  const navigate = useNavigate();
 
   return (
     <div style={styles.homeContainer}>
@@ -251,8 +253,8 @@ export default function Home({ go, toast }) {
           One platform for all your organization's approval workflows — from leave to procurement, fully automated.
         </p>
         <div style={styles.heroBtns}>
-          <button style={styles.btnPrimary} onClick={() => go && go("dashboard")}>Open Dashboard →</button>
-          <button style={styles.btnOutline} onClick={() => go && go("newreq")}>+ New Request</button>
+          <button style={styles.btnPrimary} onClick={() => navigate("/dashboard")}>Open Dashboard →</button>
+          <button style={styles.btnOutline} onClick={() => navigate("/new-request")}>+ New Request</button>
         </div>
       </div>
 
@@ -336,9 +338,9 @@ export default function Home({ go, toast }) {
             </div>
           </div>
           <div style={{ display: "flex", gap: "8px", marginTop: "18px", paddingTop: "14px", borderTop: "1px solid rgba(255,255,255,0.07)" }}>
-            <button style={styles.btnSuccess} onClick={() => toast && toast("PR-00892 Approved!", "ok")}>✓ Approve</button>
-            <button style={styles.btnDanger} onClick={() => toast && toast("PR-00892 Rejected", "warn")}>✕ Reject</button>
-            <button style={styles.btnGhost} onClick={() => go && go("approvals")}>All →</button>
+            <button style={styles.btnSuccess} onClick={() => navigate("/approvals")}>✓ Approve</button>
+            <button style={styles.btnDanger} onClick={() => navigate("/approvals")}>✕ Reject</button>
+            <button style={styles.btnGhost} onClick={() => navigate("/approvals")}>All →</button>
           </div>
         </div>
 
